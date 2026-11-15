@@ -6,7 +6,8 @@
 ⍝ clock: tick seconds remaining_ticks
 ⍝ arena: size gravity terrain_kind ground_height(x y)
 ⍝ me: health position velocity heading pitch roll angular_velocity
-⍝   attitude grounded altitude applied
+⍝   attitude grounded altitude applied hull_mounts to_mount(heading pitch)
+⍝   from_mount(heading pitch) mount_toward(point)
 ⍝ battery: charge capacity regen sustainable_drive compute
 ⍝   drive_cost(fraction)
 ⍝ drive: hover_lift
@@ -28,7 +29,8 @@
 ⍝ score: me best armour
 ⍝ angles: normalize(degrees) angle_diff(target current)
 ⍝   bearing_to(from to) elevation_to(from to) direction(heading pitch)
-⍝   distance(a b) clamp(value low high)
+⍝   distance(a b) to_chassis(heading pitch attitude)
+⍝   from_chassis(heading pitch attitude) clamp(value low high)
 ⍝ raw: number(path) text(path) has(path) flag(path) count(path) line()
 ⍝ Controls: drive.set(throttle turn pitch_turn)
 ⍝   drive.forces(thrust strafe lift yaw_torque pitch_torque roll_torque brake)
@@ -41,13 +43,15 @@
 ⍝ axis; pitch is positive up.
 ⍝ Manual: https://clunkyard.com/manual#sdk
 FREE←0
+⍝ Dodges taken, and the tick the current one ends.
+DODGES←0 ⋄ DODGEEND←0
 ∇OnStart
  FREE←(CyMatchIs3d ⍬)∧0=CyVec3Z CyArenaGravity ⍬
 ∇
 ∇Z←T Steer C
  Z←CyAnglesClamp ((CyAnglesAngleDiff T C)÷45),¯1 1
 ∇
-∇OnTurn;POS;H;P;T;Q;R;B;E;POWER;A;AH;AP;NOW;ERR;ACROSS;UP;D;TICK;STORM;ZONE;CLIMB;S
+∇OnTurn;POS;H;P;T;Q;R;B;E;POWER;A;AH;AP;NOW;ERR;ACROSS;UP;D;TICK;STORM;ZONE;CLIMB;S;C;LEFT
  POS←CyMePosition ⍬ ⋄ H←CyMeHeading ⍬ ⋄ P←CyMePitch ⍬ ⋄ TICK←CyClockTick ⍬
  CyDriveForcesBrake 0.2
  T←CySensorsNearest ⍬ ⋄ →(0=⍴T)/CUE
@@ -55,6 +59,7 @@ FREE←0
  CyDriveThrottle (0.2 0.7 ¯0.4)[1+(R>350)+2×R<200]
  CyDriveTurn B Steer H ⋄ CyDrivePitchTurn E Steer P
  CyScannerHeading B ⋄ CyScannerArc 20 ⋄ CyScannerPitch E
+ ⍝ CyGunLead is the intercept if the target holds course.
  POWER←CyGunPowerForFlightTime R 1 ⋄ A←CyGunLead T,POWER
  AH←B ⋄ AP←E ⋄ →(0=⍴A)/AIM
  AH←CySolutionHeading A ⋄ AP←CySolutionPitch A
@@ -72,7 +77,18 @@ FREE←0
  SEARCH: CyDriveThrottle 0.5 ⋄ CyDriveTurn 0.33 ⋄ CyDrivePitchTurn 0 Steer P
  CyScannerHeading CyAnglesNormalize 36+CyScanHeading CyScannerLast ⍬
  CyScannerArc 40 ⋄ CyScannerPitch FREE×35×¯1+3|⌊TICK÷10 ⋄ CyStatusText 'SEARCH'
- CHECKS: →((CyBatteryCharge ⍬)≥(CyBatteryCapacity ⍬)÷4)/STORMCHECK
+ ⍝ A simple dodge: vary it, or predict the shooter. A shot heard once the last
+ ⍝ dodge is over starts the next for 10 ticks.
+ CHECKS: C←CySensorsCues ⍬ ⍝ a count, then 10 fields a contact, the source second
+ →((TICK<DODGEEND)∨~(⊂'muzzle')∊C[3+10×¯1+⍳↑C])/DODGING
+ DODGES←DODGES+1 ⋄ DODGEEND←TICK+10
+ DODGING: →(TICK≥DODGEEND)/BATTERY
+ ⍝ Off the line of fire: left, then right next time (turn is positive left, strafe positive right).
+ LEFT←2|DODGES ⋄ →(~'forces'≡CyMatchControl ⍬)/DIRECT
+ CyDriveThrottle 0.5 ⋄ CyDriveForcesStrafe ¯1*LEFT ⋄ →SIDE
+ DIRECT: CyDriveThrottle 1 ⋄ CyDriveTurn ¯1*~LEFT
+ SIDE: CyStatusText 'dodge:',(1+LEFT)⊃'right' 'left' ⋄ CyStatusValue DODGES
+ BATTERY: →((CyBatteryCharge ⍬)≥(CyBatteryCapacity ⍬)÷4)/STORMCHECK
  CyDriveThrottle 0.5×CyDriveGet ⊂'throttle'
  STORMCHECK: STORM←CyNavStorm ⍬ ⋄ →(0=⍴STORM)/ZONECHECK
  →(¯60≥CyNavStormMargin POS)/ZONECHECK
